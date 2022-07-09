@@ -1,8 +1,6 @@
 package internal
 
 import (
-	"net/http"
-
 	"github.com/ExchangeRates/produce-mock/internal/api"
 	"github.com/ExchangeRates/produce-mock/internal/config"
 	"github.com/ExchangeRates/produce-mock/internal/controller"
@@ -17,7 +15,6 @@ func Start(config *config.Config) error {
 	mockController := controller.NewMockController(mockService, cupRateProducer)
 
 	srv := api.NewServer(mockController)
-	bindingAddr := srv.BindingAddressFromPort(config.Port)
 
-	return http.ListenAndServe(bindingAddr, srv)
+	return srv.GracefullListenAndServe(config.Port)
 }

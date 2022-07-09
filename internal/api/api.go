@@ -3,13 +3,18 @@ package api
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/ExchangeRates/produce-mock/internal/controller"
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sync/errgroup"
 )
 
 const (
@@ -20,13 +25,17 @@ const (
 
 type ctxKey int8
 
+type Server interface {
+	GracefullListenAndServe(port int) error
+}
+
 type server struct {
 	router         *mux.Router
 	log            *logrus.Logger
 	mockController *controller.MockController
 }
 
-func NewServer(mockController *controller.MockController) *server {
+func NewServer(mockController *controller.MockController) Server {
 	s := &server{
 		router:         mux.NewRouter(),
 		log:            logrus.New(),
@@ -81,9 +90,33 @@ func (s *server) logRequest(next http.Handler) http.Handler {
 	})
 }
 
-func (s *server) BindingAddressFromPort(port int) string {
+func (s *server) bindingAddressFromPort(port int) string {
 	s.log.WithFields(logrus.Fields{
 		"port": port,
 	}).Info("listening by port")
 	return fmt.Sprintf(":%d", port)
+}
+
+func (s *server) GracefullListenAndServe(port int) error {
+	mainCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	httpServer := &http.Server{
+		Addr:    s.bindingAddressFromPort(port),
+		Handler: s,
+		BaseContext: func(_ net.Listener) context.Context {
+			return mainCtx
+		},
+	}
+
+	g, gCtx := errgroup.WithContext(mainCtx)
+	g.Go(func() error {
+		return httpServer.ListenAndServe()
+	})
+	g.Go(func() error {
+		<-gCtx.Done()
+		return httpServer.Shutdown(context.Background())
+	})
+
+	return g.Wait()
 }
